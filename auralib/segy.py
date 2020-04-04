@@ -684,7 +684,6 @@ class Segy(object):
         return self.thead
 
         
-        
     def read_thead_random(self,  traces, verbose=0):
         """
         Read trace headers from random traces in a SEG-Y file.
