@@ -1,23 +1,10 @@
 """
-AuraQI module for reading data stored in SEG-Y format.
+auralib module for reading data stored in SEG-Y format.
 
 Author:   Wes Hamlyn
 Created:   1-Sep-2014
 Last Mod:  9-Mar-2017
 
-Copyright 2017 Wes Hamlyn
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 """
 
 from struct import unpack, pack
@@ -26,14 +13,15 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import sys
+import codecs
 
 
 
 #  below are example of the Python dictionary structure used to define binary
 #  and trace header keywords for SEG-Y format data files.  These can be 
-#  copies and editied as necessary for individual segy files.  Note that the
+#  copied and edited as necessary for individual segy files.  Note that the
 #  binary header dictionary must have 'samp_rate', 'num_samp', and 'samp_fmt'
-#  entries otherwise the Segy class will not intialize correctly
+#  entries otherwise the Segy class will not initialize correctly
 
 def_bhead = {'samp_rate':{'bpos':17, 'fmt':'h', 'nbyte':2},
              'num_samp':{'bpos':21, 'fmt':'h', 'nbyte':2},
@@ -212,9 +200,10 @@ class Segy(object):
         tmax = self.num_traces
         tg = int((tmax+tmin)/2)
         
+        max_iter = 100 # maximum number of iterations before deciding failure
         count = 0
         ilxlg = -1
-        while (ilxl0 != ilxlg) & (count<100):
+        while (ilxl0 != ilxlg) & (count<max_iter):
             count += 1
             #print('iteration %i' % count)
             
@@ -229,6 +218,13 @@ class Segy(object):
             if ilxlg == ilxl0:
                 if verbose:
                     print('---Success: IL: %i XL: %i Trace: %i' % (il0, xl0, tg))
+                tg = [tg]
+                
+            elif count == max_iter:
+                if verbose:
+                    print('Failed to find desired inline. Terminating...')
+                return []
+                #break
                 
             elif ilxlg > ilxl0:
                 tmax = tg*1
@@ -323,7 +319,7 @@ class Segy(object):
         return tdata
     
     
-    def read_tdata_multi(self, tr_start, tr_end, verbose=0):
+    def read_tdata_multi(self, tr_start, tr_end, skip=1, verbose=0):
         """
         Read multiple sequential traces from a SEG-Y file.  This method is faster
     		than read_trace_data() but is restricted to reading sequential traces.
@@ -366,7 +362,7 @@ class Segy(object):
                 
                 # create an empty python list to store trace amplitudes and begin
                 # looping over the traces to be read.
-                for tracenum in range(tr_start, tr_end):
+                for tracenum in range(tr_start, tr_end, skip):
                     count += 1
                     if (verbose > 0) & (count == verbose+1):
                         print('reading trace %i' % (tracenum))
@@ -398,7 +394,7 @@ class Segy(object):
                 
                 # create an empty python list to store trace amplitudes and begin
                 # looping over the traces to be read.
-                for tracenum in range(tr_start, tr_end):
+                for tracenum in range(tr_start, tr_end, skip):
                     
                     count += 1
                     if (verbose > 0) & (count == verbose+1):
@@ -576,7 +572,7 @@ class Segy(object):
         return self.thead
 
 
-    def read_thead_multi(self,  tracenum1, tracenum2, verbose=0):
+    def read_thead_multi(self,  tracenum1, tracenum2, skip=1, verbose=0):
         """
         Read trace headers from sequential traces in a SEG-Y file.
         Note:
@@ -593,7 +589,7 @@ class Segy(object):
 
         fd = open(self.filename, 'rb')
         count = 0
-        for i in range(tracenum1, tracenum2):
+        for i in range(tracenum1, tracenum2, skip):
             
             count = count + 1
             if (verbose > 0) & (count == verbose+1):
@@ -627,7 +623,7 @@ class Segy(object):
         return self.thead
 
 
-    def read_thead_multi_devtest(self,  tracenum1, tracenum2, verbose=0):
+    def read_thead_multi_devtest(self,  tracenum1, tracenum2, skip=1, verbose=0):
         """
         Read trace headers from sequential traces in a SEG-Y file.
         Note:
@@ -645,7 +641,7 @@ class Segy(object):
         fd = open(self.filename, 'rb')
         
         count = 0
-        for i in range(tracenum1, tracenum2):
+        for i in range(tracenum1, tracenum2, skip):
             
             count = count + 1
             if (verbose > 0) & (count == verbose+1):
@@ -752,6 +748,29 @@ class Segy(object):
         fd.close()
     
     
+    def write_ebcdic_new(self, ebcdic_text_file):
+        """
+        Write or update an ebcdic header
+        
+        ebcdic_text = ASCII file containing ebcdic header text, must be 40
+                      lines in length
+        """
+        
+        with open(ebcdic_text_file, 'r') as fd:
+            txt = fd.readlines()
+        
+        with open(self.filename, 'rb+') as fd:
+            fd.seek(0, 0)
+            for line in txt:
+                line = '%-80s' % (line.replace('\t', '    ').replace('\n', ''))
+                if len(line)==0:
+                    line = '%80s' % (80*' ')
+                    
+                line = codecs.encode(line, 'cp500')
+                
+                fd.write(line)
+    
+    
     def write_bhead(self, def_bhead, bhead):
         """
         Writes a Binary header
@@ -771,7 +790,7 @@ class Segy(object):
         for key in self.def_bhead.keys():
 
             bpos = self.def_bhead[key]['bpos'] +3199
-            print(bpos)
+            #print(bpos)
             fd.seek(bpos, 0)
             buf = pack(self.def_bhead[key]['fmt'], self.bhead[key])
             fd.write(buf)
@@ -789,6 +808,9 @@ class Segy(object):
         data = single value (int, float, double)
         """
         
+        # recast tracenum to int64 to avoid overflowing long ints
+        tracenum = np.array(tracenum, dtype='int64')
+
         #  make sure the endian character is set in the format string
         if fmt[0] not in  ['>', '<']:
             if self.endian == 'big':
@@ -813,6 +835,9 @@ class Segy(object):
         data = list or array of header data corresponding to the traces in
                the tracenum list (int, float, double)
         """
+
+        # recast tracenums to int64 to avoid overflowing long ints
+        tracenums = np.array(tracenums, dtype='int64')
         
         #  make sure the endian character is set in the format string
         if fmt[0] not in  ['>', '<']:
@@ -844,14 +869,17 @@ class Segy(object):
                 fd.write(bbuf[b1:b2])
         
     
-    def write_trace_data(self, tracenum, tdata):
+    def write_tdata(self, tracenum, tdata):
         """
         Writes trace data
 
         tracenum = trace number in file (zero indexed)
         data = single value (int, float, double)
         """
-
+        
+        # recast tracenums to int64 to avoid overflowing long ints
+        tracenum = np.array(tracenum, dtype='int64')
+        
         with open(self.filename, 'rb+') as fd:
             
             bpos = 3840 + tracenum*self.trace_size
@@ -864,7 +892,7 @@ class Segy(object):
             fd.write(buf)
     
     
-    def write_trace_data_multi(self, tracenums, tdata):
+    def write_tdata_multi(self, tracenums, tdata):
         """
         Writes trace data
 
@@ -873,6 +901,9 @@ class Segy(object):
         tdata = 2d array (or list) containing traces to be written where axis 1
                 is the trace number and axis 2 is the sample number.
         """
+        
+        # recast tracenums to int64 to avoid overflowing long ints
+        tracenums = np.array(tracenums, dtype='int64')
         
         nsamp = self.bhead['num_samp']
         fmt_str = '%s%i%s' % (self.fmt_str[0], nsamp, self.fmt_str[1])
